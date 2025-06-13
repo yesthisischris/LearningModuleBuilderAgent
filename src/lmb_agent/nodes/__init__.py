@@ -43,15 +43,49 @@ def ask_approval(state: Dict, llm: ChatOpenAI) -> Dict:
     print("\n" + "="*60)
     
     while True:
-        approval = input("\nDoes this plan look good? (y/n): ").strip().lower()
-        if approval in ['y', 'yes']:
+        choice = input("\nWhat would you like to do?\n(a) Approve and continue\n(f) Give feedback for changes\n(q) Quit\nChoice (a/f/q): ").strip().lower()
+        
+        if choice in ['a', 'approve']:
             state["approved"] = True
+            state["needs_feedback"] = False
             break
-        elif approval in ['n', 'no']:
+        elif choice in ['f', 'feedback']:
+            feedback = input("\nWhat changes would you like to see in the lesson structure?\n> ")
+            state["feedback"] = feedback
             state["approved"] = False
+            state["needs_feedback"] = True
+            break
+        elif choice in ['q', 'quit']:
+            state["approved"] = False
+            state["needs_feedback"] = False
             break
         else:
-            print("Please enter 'y' for yes or 'n' for no.")
+            print("Please enter 'a' for approve, 'f' for feedback, or 'q' to quit.")
+    return state
+
+
+def revise_plan(state: Dict, llm: ChatOpenAI) -> Dict:
+    """Revise the plan based on user feedback."""
+    if not state.get("needs_feedback", False) or not state.get("feedback"):
+        return state
+    
+    print("\n🔄 Revising lesson plan based on your feedback...")
+    
+    prompt = f"""Revise this lesson outline based on the user's feedback:
+
+Original Topic: {state['topic']}
+Original Outline: {state['outline']}
+
+User Feedback: {state['feedback']}
+
+Please create a revised outline that addresses the user's feedback while maintaining educational value and structure. Keep it concise and focused on the main learning objectives."""
+
+    response = llm.invoke(prompt)
+    state["outline"] = response.content
+    
+    # Clear feedback flags so we can ask for approval again
+    state["feedback"] = ""
+    state["needs_feedback"] = False
     
     return state
 
@@ -62,29 +96,39 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
         print("Plan was not approved. Exiting.")
         state["cells"] = ""
         return state
+    
+    print("\n📝 Generating notebook content...")
         
     prompt = f"""Generate Jupyter notebook cells for this lesson outline:
 
 Topic: {state['topic']}
 Outline: {state['outline']}
 
-Create a comprehensive learning module with:
-1. A markdown introduction cell explaining the topic
-2. Code cells with practical examples and exercises
-3. Markdown cells with explanations between code sections
-4. Comments in code cells to guide learning
+Create a hands-on learning module following this pattern:
+- CONCEPT (markdown cell explaining a concept)
+- PRACTICE (code cell with example + exercise)
+- CONCEPT (markdown cell explaining next concept) 
+- PRACTICE (code cell with example + exercise)
+- Continue alternating...
 
-Format the output as a valid JSON structure representing notebook cells.
-Each cell should have:
+Guidelines:
+- Skip package installation instructions - assume libraries are already installed
+- Focus on practical, hands-on learning with immediate code examples
+- Each concept should be concise and immediately followed by practice
+- Code cells should include both examples AND exercises for the learner to try
+- Use clear, educational comments in code
+- Make exercises progressively build on previous concepts
+
+Format the output as a valid JSON array of notebook cells. Each cell must have:
 - "cell_type": "markdown" or "code"
 - "source": array of strings (each line as a separate string)
-- "metadata": empty object {{}}
+- "metadata": {{"language": "markdown"}} for markdown cells or {{"language": "python"}} for code cells
 
 For code cells, also include:
 - "execution_count": null
 - "outputs": []
 
-Make sure the content is educational, practical, and suitable for learning."""
+Return ONLY the JSON array of cells, no additional text or formatting."""
 
     response = llm.invoke(prompt)
     state["cells"] = response.content
@@ -111,22 +155,33 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
         
         try:
             cells = json.loads(cells_content)
-        except json.JSONDecodeError:
+            # Ensure each cell has proper metadata with language property
+            for cell in cells:
+                if "metadata" not in cell:
+                    cell["metadata"] = {}
+                if "language" not in cell["metadata"]:
+                    if cell["cell_type"] == "code":
+                        cell["metadata"]["language"] = "python"
+                    else:
+                        cell["metadata"]["language"] = "markdown"
+                        
+        except json.JSONDecodeError as e:
+            print(f"⚠️  JSON parsing failed: {e}")
             # If parsing fails, create a simple notebook with the content as markdown
             cells = [
                 {
                     "cell_type": "markdown",
-                    "metadata": {},
+                    "metadata": {"language": "markdown"},
                     "source": [f"# {state['topic']}\n\n"]
                 },
                 {
                     "cell_type": "markdown", 
-                    "metadata": {},
+                    "metadata": {"language": "markdown"},
                     "source": [state['outline']]
                 },
                 {
                     "cell_type": "markdown",
-                    "metadata": {},
+                    "metadata": {"language": "markdown"},
                     "source": ["## Generated Content\n\n", state['cells']]
                 }
             ]
@@ -141,7 +196,15 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
                     "name": "python3"
                 },
                 "language_info": {
+                    "codemirror_mode": {
+                        "name": "ipython",
+                        "version": 3
+                    },
+                    "file_extension": ".py",
+                    "mimetype": "text/x-python",
                     "name": "python",
+                    "nbconvert_exporter": "python",
+                    "pygments_lexer": "ipython3",
                     "version": "3.10.0"
                 }
             },
@@ -158,6 +221,8 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
         
     except Exception as e:
         print(f"\n❌ Error saving notebook: {e}")
+        # Print more details for debugging
+        print(f"Error details: {str(e)}")
         state["notebook_file"] = None
     
     return state

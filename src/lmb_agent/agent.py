@@ -9,7 +9,7 @@ from __future__ import annotations
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, END, StateGraph
 
-from .nodes import clarify, generate, plan, ask_approval, save_notebook
+from .nodes import clarify, generate, plan, ask_approval, revise_plan, save_notebook
 
 
 def build_agent(llm: ChatOpenAI | None = None) -> StateGraph:
@@ -20,13 +20,22 @@ def build_agent(llm: ChatOpenAI | None = None) -> StateGraph:
     graph.add_node("clarify", lambda state: clarify(state, llm))
     graph.add_node("plan", lambda state: plan(state, llm))
     graph.add_node("ask_approval", lambda state: ask_approval(state, llm))
+    graph.add_node("revise_plan", lambda state: revise_plan(state, llm))
     graph.add_node("generate", lambda state: generate(state, llm))
     graph.add_node("save_notebook", lambda state: save_notebook(state, llm))
+
+    # Define routing function
+    def should_revise(state):
+        return "revise_plan" if state.get("needs_feedback", False) else "generate"
+    
+    def should_continue_after_revision(state):
+        return "ask_approval"
 
     graph.add_edge(START, "clarify")
     graph.add_edge("clarify", "plan")
     graph.add_edge("plan", "ask_approval")
-    graph.add_edge("ask_approval", "generate")
+    graph.add_conditional_edges("ask_approval", should_revise, ["revise_plan", "generate"])
+    graph.add_edge("revise_plan", "ask_approval")
     graph.add_edge("generate", "save_notebook")
     graph.add_edge("save_notebook", END)
     return graph.compile()
