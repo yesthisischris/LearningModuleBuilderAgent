@@ -12,21 +12,26 @@ from langchain_openai import ChatOpenAI
 
 
 def clarify(state: Dict, llm: ChatOpenAI) -> Dict:
-    """Ask the user for a concise topic clarification."""
-    question = "Please provide a short topic for the learning module"
-    state["topic"] = llm.predict(question)
+    """Use the provided topic or ask the user for a concise topic clarification."""
+    if "topic" not in state or not state["topic"]:
+        question = "Please provide a short topic for the learning module"
+        response = llm.invoke(question)
+        state["topic"] = response.content
     return state
 
 
 def plan(state: Dict, llm: ChatOpenAI) -> Dict:
     """Create a brief lesson outline for the clarified topic."""
     prompt = f"Create an outline for a lesson on {state['topic']}"
-    state["outline"] = llm.predict(prompt)
+    response = llm.invoke(prompt)
+    state["outline"] = response.content
     return state
 
 
 def generate(state: Dict, llm: ChatOpenAI) -> Dict:
     """Generate notebook cells for the given outline."""
     prompt = f"Generate notebook cells for: {state['outline']}"
-    state["cells"] = llm.predict(prompt)
+    response = llm.invoke(prompt)
+    state["cells"] = response.content
+    return state
     return state
