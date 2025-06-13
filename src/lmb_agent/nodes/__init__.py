@@ -122,14 +122,13 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
         research_context += f"\n\nCURRENT CODE EXAMPLES FROM DOCUMENTATION:\n{state['doc_content'][:2000]}..."
     package_names = state.get("package_names", [])
     packages_str = ", ".join(package_names) if package_names else "Python"
-    
-    prompt = f"""Generate Jupyter notebook cells for this lesson outline:
+    prompt = """Generate Jupyter notebook cells for this lesson outline:
 
-Topic: {state['topic']}
-Outline: {state['outline']}
-Packages: {packages_str}
+Topic: {}
+Outline: {}
+Packages: {}
 
-{research_context}
+{}
 
 CRITICAL IMPORTANCE: Use ONLY the NEWEST, CURRENT syntax based on the research above. 
 - DO NOT use any deprecated or legacy function names
@@ -166,21 +165,26 @@ For code cells, also include:
 
 Example format:
 [
-  {
+  {{
     "cell_type": "markdown",
-    "metadata": {"language": "markdown"},
+    "metadata": {{"language": "markdown"}},
     "source": ["# Title", "Description text"]
-  },
-  {
+  }},
+  {{
     "cell_type": "code", 
-    "metadata": {"language": "python"},
+    "metadata": {{"language": "python"}},
     "source": ["import package", "# Example code"],
     "execution_count": null,
     "outputs": []
-  }
+  }}
 ]
 
-Return ONLY the JSON array of cells, no additional text or formatting."""
+Return ONLY the JSON array of cells, no additional text or formatting.""".format(
+        state['topic'], 
+        state['outline'], 
+        packages_str, 
+        research_context
+    )
 
     response = llm.invoke(prompt)
     state["cells"] = response.content
@@ -295,7 +299,6 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
     
     # Use LLM to intelligently extract package names from the topic
     topic = state['topic']
-    
     extraction_prompt = f"""From this learning topic: "{topic}"
     
     Extract the main Python package/library names that would be used. Return ONLY a comma-separated list of package names.
@@ -306,7 +309,8 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
     - "Web Scraping with BeautifulSoup and Requests" -> beautifulsoup4, requests
     - "Machine Learning with scikit-learn" -> scikit-learn
     - "Building APIs with FastAPI" -> fastapi
-    - "Geospatial Analysis with H3" -> h3-py
+    - "Geospatial Analysis with H3" -> h3
+    - "intro to h3" -> h3
     - "Working with Jupyter Widgets" -> ipywidgets
     - "Time Series Analysis with Prophet" -> prophet
     
