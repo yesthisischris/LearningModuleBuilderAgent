@@ -123,8 +123,7 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
     
     package_names = state.get("package_names", [])
     packages_str = ", ".join(package_names) if package_names else "Python"
-    
-    prompt = f"""Generate Jupyter notebook cells for this lesson outline:
+      prompt = f"""Generate Jupyter notebook cells for this lesson outline:
 
 Topic: {state['topic']}
 Outline: {state['outline']}
@@ -132,7 +131,11 @@ Packages: {packages_str}
 
 {research_context}
 
-IMPORTANT: Use ONLY current, valid syntax based on the research above. Do NOT use deprecated methods or outdated syntax.
+CRITICAL IMPORTANCE: Use ONLY the NEWEST, CURRENT syntax based on the research above. 
+- DO NOT use any deprecated or legacy function names
+- VERIFY every function name against the research provided above
+- If the research shows multiple syntax options, use the MOST RECENT one
+- When in doubt, search for the "latest" or "current" function names in the research
 
 Create a hands-on learning module following this pattern:
 - CONCEPT (markdown cell explaining a concept)
@@ -148,9 +151,9 @@ Guidelines:
 - Code cells should include both examples AND exercises for the learner to try
 - Use clear, educational comments in code
 - Make exercises progressively build on previous concepts
-- VERIFY all function names and syntax against the research provided above
-- If unsure about syntax, prefer simpler, more basic approaches that are likely to work
 - Use the EXACT function names and syntax patterns shown in the research examples
+- If the research shows version-specific changes, use the syntax for the LATEST version shown
+- Include comments mentioning if certain functions replaced older deprecated ones
 
 Format the output as a valid JSON array of notebook cells. Each cell must have:
 - "cell_type": "markdown" or "code"
@@ -335,18 +338,19 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
         # Research each package with web search
         for package_name in package_names[:3]:  # Limit to 3 packages to avoid too many requests
             print(f"   🔎 Researching {package_name}...")
-            
-            # Create diverse search queries, enhanced with version info if available
+              # Create diverse search queries, enhanced with version info if available
             version_info = package_info.get(package_name, {}).get("version", "")
             search_queries = [
-                f"{package_name} python documentation latest API reference {version_info}",
-                f"{package_name} python tutorial examples 2024 2025 getting started",
-                f"how to use {package_name} python current syntax examples"
+                f"{package_name} python API reference {version_info} function names",
+                f"{package_name} python latest documentation {version_info} current syntax",
+                f"{package_name} python migration guide deprecated functions {version_info}",
+                f"site:github.com {package_name} python examples {version_info}",
+                f"site:readthedocs.io {package_name} API reference"
             ]
             
             ddgs = DDGS()
             
-            for query in search_queries[:2]:  # 2 queries per package
+            for query in search_queries[:3]:  # 3 queries per package for better coverage
                 try:
                     results = ddgs.text(query, max_results=3)
                     for result in results:
@@ -364,37 +368,84 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
                 except Exception as e:
                     print(f"      ⚠️  Search failed for '{query}': {e}")
                     continue
-            
-            # Try to fetch detailed content from the best sources
+              # Try to fetch detailed content from the best sources
             package_doc_content = ""
-            for result in research_results:
-                if result.get('package') == package_name and any(domain in result['url'] for domain in ['readthedocs.io', 'docs.python.org', 'github.com']):
-                    try:
-                        response = requests.get(result['url'], timeout=10, headers={'User-Agent': 'Mozilla/5.0 (compatible; LearningBot/1.0)'})
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.content, 'html.parser')
-                            
-                            # Extract code examples and function signatures
-                            code_blocks = soup.find_all(['pre', 'code', 'div'], class_=lambda x: x and ('highlight' in x or 'code' in x or 'example' in x))
-                            
-                            # Also look for common code containers
-                            if not code_blocks:
-                                code_blocks = soup.find_all(['pre', 'code'])
-                            
-                            for block in code_blocks[:8]:  # Get more examples per package
-                                code_text = block.get_text().strip()
-                                if code_text and len(code_text) > 10 and package_name in code_text.lower():
-                                    package_doc_content += f"\n\nCode example for {package_name} from {result['url']}:\n{code_text[:500]}...\n"
-                            
-                            # Look for function definitions and imports
-                            import_statements = soup.find_all(text=re.compile(rf'import.*{package_name}'))
-                            for imp in import_statements[:3]:
-                                package_doc_content += f"\nImport example: {imp.strip()}\n"
-                            
-                            break  # Got content for this package, move to next
-                    except Exception as e:
-                        print(f"      ⚠️  Failed to fetch content from {result['url']}: {e}")
-                        continue
+            
+            # First try official documentation from PyPI info
+            pkg_info = package_info.get(package_name, {})
+            docs_urls = []
+            if pkg_info.get('docs_url'):
+                docs_urls.append(pkg_info['docs_url'])
+            if pkg_info.get('project_urls'):
+                for url_type, url in pkg_info['project_urls'].items():
+                    if any(keyword in url_type.lower() for keyword in ['doc', 'api', 'reference']):
+                        docs_urls.append(url)
+            
+            # Try official docs first
+            for docs_url in docs_urls[:2]:
+                try:
+                    print(f"      📚 Fetching official docs from {docs_url}")
+                    response = requests.get(docs_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0 (compatible; LearningBot/1.0)'})
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        
+                        # Extract current API examples
+                        code_blocks = soup.find_all(['pre', 'code', 'div'], class_=lambda x: x and ('highlight' in x or 'code' in x or 'example' in x))
+                        for block in code_blocks[:10]:
+                            code_text = block.get_text().strip()
+                            if code_text and len(code_text) > 10:
+                                package_doc_content += f"\n\nOfficial docs example for {package_name}:\n{code_text[:600]}...\n"
+                        
+                        if package_doc_content:  # Found good content, use it
+                            break
+                except Exception as e:
+                    print(f"      ⚠️  Failed to fetch official docs from {docs_url}: {e}")
+                    continue            # Then try other research results if we didn't get enough from official docs
+            if len(package_doc_content) < 500:
+                for result in research_results:
+                    if result.get('package') == package_name and any(domain in result['url'] for domain in ['readthedocs.io', 'docs.python.org', 'github.com']):
+                        try:
+                            response = requests.get(result['url'], timeout=10, headers={'User-Agent': 'Mozilla/5.0 (compatible; LearningBot/1.0)'})
+                            if response.status_code == 200:
+                                soup = BeautifulSoup(response.content, 'html.parser')
+                                
+                                # Extract code examples and function signatures
+                                code_blocks = soup.find_all(['pre', 'code', 'div'], class_=lambda x: x and ('highlight' in x or 'code' in x or 'example' in x or 'function' in x))
+                                
+                                # Also look for common code containers and function definitions
+                                if not code_blocks:
+                                    code_blocks = soup.find_all(['pre', 'code'])
+                                
+                                # Look for API reference sections specifically
+                                api_sections = soup.find_all(['div', 'section'], class_=lambda x: x and ('api' in x or 'reference' in x or 'method' in x))
+                                for section in api_sections[:3]:
+                                    code_in_section = section.find_all(['code', 'pre'])
+                                    code_blocks.extend(code_in_section)
+                                
+                                for block in code_blocks[:12]:  # Get more examples per package
+                                    code_text = block.get_text().strip()
+                                    # Prioritize code that shows function calls or imports
+                                    if (code_text and len(code_text) > 10 and 
+                                        (package_name.replace('-', '') in code_text.lower() or 
+                                         package_name.replace('-', '_') in code_text.lower() or
+                                         '(' in code_text)):  # Likely a function call
+                                        package_doc_content += f"\n\nCode example for {package_name} from {result['url']}:\n{code_text[:600]}...\n"
+                                
+                                # Look for function definitions and imports more broadly
+                                import_statements = soup.find_all(text=re.compile(rf'import.*{package_name.replace("-", "[-_]?")}'))
+                                for imp in import_statements[:5]:
+                                    package_doc_content += f"\nImport example: {imp.strip()}\n"
+                                
+                                # Look for deprecated/migration information
+                                deprecated_text = soup.find_all(text=re.compile(r'deprecated|migration|replaced|legacy|old.*new', re.IGNORECASE))
+                                for dep_text in deprecated_text[:3]:
+                                    if package_name.lower() in dep_text.lower():
+                                        package_doc_content += f"\nDeprecation note: {dep_text.strip()[:200]}...\n"
+                                
+                                break  # Got content for this package, move to next
+                        except Exception as e:
+                            print(f"      ⚠️  Failed to fetch content from {result['url']}: {e}")
+                            continue
             
             all_doc_content += package_doc_content
         state["research_results"] = research_results
