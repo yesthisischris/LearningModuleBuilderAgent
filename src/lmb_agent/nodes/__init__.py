@@ -103,11 +103,28 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
         return state
     
     print("\n📝 Generating notebook content...")
-        
+      # Build context from research
+    research_context = ""
+    if state.get("research_results"):
+        research_context += "\n\nCURRENT DOCUMENTATION SOURCES:\n"
+        for result in state["research_results"][:5]:  # Use top 5 results
+            research_context += f"- {result['title']} ({result.get('package', 'unknown')}): {result['snippet'][:150]}...\n"
+    
+    if state.get("doc_content"):
+        research_context += f"\n\nCURRENT CODE EXAMPLES FROM DOCUMENTATION:\n{state['doc_content'][:2000]}..."
+    
+    package_names = state.get("package_names", [])
+    packages_str = ", ".join(package_names) if package_names else "Python"
+    
     prompt = f"""Generate Jupyter notebook cells for this lesson outline:
 
 Topic: {state['topic']}
 Outline: {state['outline']}
+Packages: {packages_str}
+
+{research_context}
+
+IMPORTANT: Use ONLY current, valid syntax based on the research above. Do NOT use deprecated methods or outdated syntax.
 
 Create a hands-on learning module following this pattern:
 - CONCEPT (markdown cell explaining a concept)
@@ -123,6 +140,9 @@ Guidelines:
 - Code cells should include both examples AND exercises for the learner to try
 - Use clear, educational comments in code
 - Make exercises progressively build on previous concepts
+- VERIFY all function names and syntax against the research provided above
+- If unsure about syntax, prefer simpler, more basic approaches that are likely to work
+- Use the EXACT function names and syntax patterns shown in the research examples
 
 Format the output as a valid JSON array of notebook cells. Each cell must have:
 - "cell_type": "markdown" or "code"
@@ -229,5 +249,134 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
         # Print more details for debugging
         print(f"Error details: {str(e)}")
         state["notebook_file"] = None
+    
+    return state
+
+
+def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
+    """Research the latest package documentation and examples."""
+    if not state.get("approved", False):
+        return state
+    
+    print("\n🔍 Researching latest package documentation and examples...")
+    
+    # Use LLM to intelligently extract package names from the topic
+    topic = state['topic']
+    
+    extraction_prompt = f"""From this learning topic: "{topic}"
+    
+    Extract the main Python package/library names that would be used. Return ONLY a comma-separated list of package names.
+    
+    Examples:
+    - "Intro to NumPy" -> numpy
+    - "Data Analysis with Pandas and Matplotlib" -> pandas, matplotlib  
+    - "Web Scraping with BeautifulSoup and Requests" -> beautifulsoup4, requests
+    - "Machine Learning with scikit-learn" -> scikit-learn
+    - "Building APIs with FastAPI" -> fastapi
+    - "Geospatial Analysis with H3" -> h3-py
+    - "Working with Jupyter Widgets" -> ipywidgets
+    - "Time Series Analysis with Prophet" -> prophet
+    
+    If no specific packages are mentioned, return the most likely packages for the topic.
+    If it's a general Python topic without specific packages, return "python".
+    
+    Package names only, no explanations:"""
+    
+    try:
+        response = llm.invoke(extraction_prompt)
+        extracted_packages = response.content.strip().split(',')
+        package_names = [pkg.strip() for pkg in extracted_packages if pkg.strip()]
+        print(f"📦 Detected packages: {', '.join(package_names)}")
+    except Exception as e:
+        print(f"⚠️  Package extraction failed: {e}")
+        # Fallback to simple keyword extraction
+        topic_lower = topic.lower()
+        common_packages = ['numpy', 'pandas', 'matplotlib', 'seaborn', 'sklearn', 'tensorflow', 'pytorch', 'flask', 'django', 'fastapi', 'requests', 'beautifulsoup']
+        package_names = [pkg for pkg in common_packages if pkg in topic_lower]
+        if not package_names:
+            package_names = [topic.split()[0].lower() if topic.split() else "python"]    
+    research_results = []
+    all_doc_content = ""
+    
+    try:
+        # Research each package
+        for package_name in package_names[:3]:  # Limit to 3 packages to avoid too many requests
+            print(f"   🔎 Researching {package_name}...")
+            
+            # Create diverse search queries for better coverage
+            search_queries = [
+                f"{package_name} python documentation latest API reference",
+                f"{package_name} python tutorial examples 2024 2025 getting started",
+                f"how to use {package_name} python current syntax examples"
+            ]
+            
+            ddgs = DDGS()
+            
+            for query in search_queries[:2]:  # 2 queries per package
+                try:
+                    results = ddgs.text(query, max_results=3)
+                    for result in results:
+                        # Accept more diverse sources but prioritize official ones
+                        priority_domains = ['readthedocs.io', 'docs.python.org', 'github.com', 'pypi.org']
+                        secondary_domains = ['stackoverflow.com', 'medium.com', 'towardsdatascience.com', 'realpython.com']
+                        
+                        if any(domain in result['href'] for domain in priority_domains + secondary_domains):
+                            research_results.append({
+                                'title': result['title'],
+                                'url': result['href'],
+                                'snippet': result['body'],
+                                'package': package_name
+                            })
+                except Exception as e:
+                    print(f"      ⚠️  Search failed for '{query}': {e}")
+                    continue
+            
+            # Try to fetch detailed content from the best sources
+            package_doc_content = ""
+            for result in research_results:
+                if result.get('package') == package_name and any(domain in result['url'] for domain in ['readthedocs.io', 'docs.python.org', 'github.com']):
+                    try:
+                        response = requests.get(result['url'], timeout=10, headers={'User-Agent': 'Mozilla/5.0 (compatible; LearningBot/1.0)'})
+                        if response.status_code == 200:
+                            soup = BeautifulSoup(response.content, 'html.parser')
+                            
+                            # Extract code examples and function signatures
+                            code_blocks = soup.find_all(['pre', 'code', 'div'], class_=lambda x: x and ('highlight' in x or 'code' in x or 'example' in x))
+                            
+                            # Also look for common code containers
+                            if not code_blocks:
+                                code_blocks = soup.find_all(['pre', 'code'])
+                            
+                            for block in code_blocks[:8]:  # Get more examples per package
+                                code_text = block.get_text().strip()
+                                if code_text and len(code_text) > 10 and package_name in code_text.lower():
+                                    package_doc_content += f"\n\nCode example for {package_name} from {result['url']}:\n{code_text[:500]}...\n"
+                            
+                            # Look for function definitions and imports
+                            import_statements = soup.find_all(text=re.compile(rf'import.*{package_name}'))
+                            for imp in import_statements[:3]:
+                                package_doc_content += f"\nImport example: {imp.strip()}\n"
+                            
+                            break  # Got content for this package, move to next
+                    except Exception as e:
+                        print(f"      ⚠️  Failed to fetch content from {result['url']}: {e}")
+                        continue
+            
+            all_doc_content += package_doc_content
+        
+        state["research_results"] = research_results
+        state["doc_content"] = all_doc_content
+        state["package_names"] = package_names
+        
+        print(f"✅ Research completed for {len(package_names)} packages")
+        print(f"   Found {len(research_results)} relevant sources")
+        if all_doc_content:
+            print(f"   Extracted {len(all_doc_content.split('Code example'))-1} code examples")
+        
+    except Exception as e:
+        print(f"⚠️  Research failed: {e}")
+        state["research_results"] = []
+        state["doc_content"] = ""
+        state["package_names"] = package_names
     
     return state
