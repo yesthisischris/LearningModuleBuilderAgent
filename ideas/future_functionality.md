@@ -1,0 +1,2 @@
+-searches web to find latest documentation and ensure all syntax is up to date
+-uses external coder

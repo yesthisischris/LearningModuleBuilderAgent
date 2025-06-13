@@ -15,9 +15,20 @@ def main() -> None:
     parser.add_argument("topic", help="Short lesson topic")
     args = parser.parse_args()
 
+    print(f"🚀 Creating learning module for: {args.topic}")
+    print("📝 Generating lesson plan...")
+    
     agent = build_agent()
     result = agent.invoke({"topic": args.topic})
-    print(result)
+    
+    if result.get("notebook_file"):
+        print(f"\n🎉 Learning module complete!")
+        print(f"📁 File saved: {result['notebook_file']}")
+    else:
+        print("\n❌ Learning module creation was cancelled or failed.")
+    
+    # Don't print the full result anymore since it's verbose
+    # print(result)
 
 
 if __name__ == "__main__":
