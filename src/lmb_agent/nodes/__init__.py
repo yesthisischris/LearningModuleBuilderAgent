@@ -102,9 +102,17 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
         state["cells"] = ""
         return state
     
-    print("\n📝 Generating notebook content...")
-      # Build context from research
+    print("\n📝 Generating notebook content...")    # Build context from research
     research_context = ""
+    
+    # Add PyPI package information if available
+    if state.get("package_info"):
+        research_context += "\n\nPACKAGE INFORMATION FROM PyPI:\n"
+        for pkg_name, info in state["package_info"].items():
+            research_context += f"- {pkg_name} v{info['version']}: {info['summary']}\n"
+            if info.get('docs_url'):
+                research_context += f"  Documentation: {info['docs_url']}\n"
+    
     if state.get("research_results"):
         research_context += "\n\nCURRENT DOCUMENTATION SOURCES:\n"
         for result in state["research_results"][:5]:  # Use top 5 results
@@ -294,18 +302,44 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
         common_packages = ['numpy', 'pandas', 'matplotlib', 'seaborn', 'sklearn', 'tensorflow', 'pytorch', 'flask', 'django', 'fastapi', 'requests', 'beautifulsoup']
         package_names = [pkg for pkg in common_packages if pkg in topic_lower]
         if not package_names:
-            package_names = [topic.split()[0].lower() if topic.split() else "python"]    
+            package_names = [topic.split()[0].lower() if topic.split() else "python"]
+    
     research_results = []
     all_doc_content = ""
+    package_info = {}
     
     try:
-        # Research each package
+        # First, get package information from PyPI
+        for package_name in package_names[:3]:  # Limit to 3 packages
+            print(f"   📦 Getting PyPI info for {package_name}...")
+            try:
+                pypi_url = f"https://pypi.org/pypi/{package_name}/json"
+                response = requests.get(pypi_url, timeout=10)
+                if response.status_code == 200:
+                    pypi_data = response.json()
+                    info = pypi_data.get("info", {})
+                    package_info[package_name] = {
+                        "version": info.get("version", "unknown"),
+                        "summary": info.get("summary", ""),
+                        "home_page": info.get("home_page", ""),
+                        "docs_url": info.get("docs_url", ""),
+                        "project_urls": info.get("project_urls", {}),
+                        "description": info.get("description", "")[:500]  # Truncate description
+                    }
+                    print(f"      ✅ Found {package_name} v{package_info[package_name]['version']}")
+                else:
+                    print(f"      ⚠️  PyPI lookup failed for {package_name} (status: {response.status_code})")
+            except Exception as e:
+                print(f"      ⚠️  PyPI lookup failed for {package_name}: {e}")
+        
+        # Research each package with web search
         for package_name in package_names[:3]:  # Limit to 3 packages to avoid too many requests
             print(f"   🔎 Researching {package_name}...")
             
-            # Create diverse search queries for better coverage
+            # Create diverse search queries, enhanced with version info if available
+            version_info = package_info.get(package_name, {}).get("version", "")
             search_queries = [
-                f"{package_name} python documentation latest API reference",
+                f"{package_name} python documentation latest API reference {version_info}",
                 f"{package_name} python tutorial examples 2024 2025 getting started",
                 f"how to use {package_name} python current syntax examples"
             ]
@@ -363,10 +397,10 @@ def research_package(state: Dict, llm: ChatOpenAI) -> Dict:
                         continue
             
             all_doc_content += package_doc_content
-        
         state["research_results"] = research_results
         state["doc_content"] = all_doc_content
         state["package_names"] = package_names
+        state["package_info"] = package_info
         
         print(f"✅ Research completed for {len(package_names)} packages")
         print(f"   Found {len(research_results)} relevant sources")
