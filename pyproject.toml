@@ -12,6 +12,9 @@ dependencies = [
     "langchain-community",
     "langgraph",
     "openai",
+    "requests",
+    "beautifulsoup4",
+    "duckduckgo-search",
 ]
 
 [project.scripts]

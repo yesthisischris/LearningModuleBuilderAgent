@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Dict
+
+import requests
+from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS
 
 from langchain_openai import ChatOpenAI
 
