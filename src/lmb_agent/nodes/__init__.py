@@ -120,10 +120,10 @@ def generate(state: Dict, llm: ChatOpenAI) -> Dict:
     
     if state.get("doc_content"):
         research_context += f"\n\nCURRENT CODE EXAMPLES FROM DOCUMENTATION:\n{state['doc_content'][:2000]}..."
-    
     package_names = state.get("package_names", [])
     packages_str = ", ".join(package_names) if package_names else "Python"
-      prompt = f"""Generate Jupyter notebook cells for this lesson outline:
+    
+    prompt = f"""Generate Jupyter notebook cells for this lesson outline:
 
 Topic: {state['topic']}
 Outline: {state['outline']}
@@ -158,11 +158,27 @@ Guidelines:
 Format the output as a valid JSON array of notebook cells. Each cell must have:
 - "cell_type": "markdown" or "code"
 - "source": array of strings (each line as a separate string)
-- "metadata": {{"language": "markdown"}} for markdown cells or {{"language": "python"}} for code cells
+- "metadata": object with "language" property ("markdown" for markdown cells, "python" for code cells)
 
 For code cells, also include:
 - "execution_count": null
 - "outputs": []
+
+Example format:
+[
+  {
+    "cell_type": "markdown",
+    "metadata": {"language": "markdown"},
+    "source": ["# Title", "Description text"]
+  },
+  {
+    "cell_type": "code", 
+    "metadata": {"language": "python"},
+    "source": ["import package", "# Example code"],
+    "execution_count": null,
+    "outputs": []
+  }
+]
 
 Return ONLY the JSON array of cells, no additional text or formatting."""
 
@@ -188,7 +204,6 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
             cells_content = cells_content.split('```json')[1].split('```')[0].strip()
         elif cells_content.startswith('```'):
             cells_content = cells_content.split('```')[1].split('```')[0].strip()
-        
         try:
             cells = json.loads(cells_content)
             # Ensure each cell has proper metadata with language property
@@ -200,6 +215,13 @@ def save_notebook(state: Dict, llm: ChatOpenAI) -> Dict:
                         cell["metadata"]["language"] = "python"
                     else:
                         cell["metadata"]["language"] = "markdown"
+                
+                # Ensure code cells have execution_count and outputs
+                if cell["cell_type"] == "code":
+                    if "execution_count" not in cell:
+                        cell["execution_count"] = None
+                    if "outputs" not in cell:
+                        cell["outputs"] = []
                         
         except json.JSONDecodeError as e:
             print(f"⚠️  JSON parsing failed: {e}")
