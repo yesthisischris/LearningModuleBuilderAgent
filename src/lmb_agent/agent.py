@@ -6,7 +6,7 @@ plans a short lesson outline, then generates notebook cells.
 """
 from __future__ import annotations
 
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langgraph.graph import START, END, StateGraph
 
 from .nodes import clarify, generate, plan

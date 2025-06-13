@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 
 
 def clarify(state: Dict, llm: ChatOpenAI) -> Dict:
