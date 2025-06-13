@@ -1,0 +1,15 @@
+[project]
+name = "learning-module-builder-agent"
+version = "0.1.0"
+description = "Minimal LangGraph workflow for building Jupyter-based learning modules"
+authors = [{name = "Example", email = "example@example.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+lmb-agent = "lmb_agent.cli:main"
+
+[project.dependencies]
+langchain = "*"
+langgraph = "*"
+openai = "*"
