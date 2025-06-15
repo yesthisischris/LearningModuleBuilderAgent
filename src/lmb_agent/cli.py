@@ -22,7 +22,7 @@ def main() -> None:
     result = agent.invoke({"topic": args.topic})
     
     if result.get("notebook_file"):
-        print(f"\n🎉 Learning module complete!")
+        print("\n🎉 Learning module complete!")
         print(f"📁 File saved: {result['notebook_file']}")
     else:
         print("\n❌ Learning module creation was cancelled or failed.")
